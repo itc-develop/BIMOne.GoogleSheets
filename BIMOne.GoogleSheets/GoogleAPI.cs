@@ -3,6 +3,7 @@ using Google.Apis.Sheets.v4;
 using Google.Apis.Sheets.v4.Data;
 using Google.Apis.Drive.v3;
 using Google.Apis.Services;
+using Google.Apis.Http;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -24,7 +25,7 @@ namespace BIMOne
         static string assemblyPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
         static string credentialsPath = Path.Combine(assemblyPath, @"..\extra\credentials.json");
 
-        static UserCredential credential;
+        static IConfigurableHttpClientInitializer credential;
 
         static DriveService driveService { get => 
             // Create Google Drive API service.
@@ -60,17 +61,29 @@ namespace BIMOne
         }
 
         [IsVisibleInDynamoLibrary(false)]
-        static UserCredential GetCredentials()
+        static IConfigurableHttpClientInitializer GetCredentials()
         {
             checkForCredentials();
-            using (var stream =
-                new FileStream(credentialsPath, FileMode.Open, FileAccess.Read))
+
+            try
             {
-                return credential = GoogleWebAuthorizationBroker.AuthorizeAsync(
-                    GoogleClientSecrets.FromStream(stream).Secrets,
-                    Scopes,
-                    "user",
-                    CancellationToken.None).Result;
+                using (var stream =
+                    new FileStream(credentialsPath, FileMode.Open, FileAccess.Read))
+                {
+                    return credential = GoogleWebAuthorizationBroker.AuthorizeAsync(
+                        GoogleClientSecrets.FromStream(stream).Secrets,
+                        Scopes,
+                        "user",
+                        CancellationToken.None).Result;
+                }
+            }
+            catch
+            {
+                using (var stream = new FileStream(credentialsPath,
+                    FileMode.Open, FileAccess.Read))
+                {
+                    return credential = GoogleCredential.FromStream(stream).CreateScoped(Scopes);
+                }
             }
         }
 
@@ -83,9 +96,12 @@ namespace BIMOne
         public async static Task<bool> Logout()
         {
             var credential = GetCredentials();
-            bool res = await credential.RevokeTokenAsync(CancellationToken.None);
+            if (credential.GetType() == typeof(UserCredential))
+            {
+                return await ((UserCredential) credential).RevokeTokenAsync(CancellationToken.None);
+            }
 
-            return res;
+            return true;
         }
 
         /// <summary>
